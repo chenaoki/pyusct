@@ -6,9 +6,10 @@ import h5py
 import os
 import scipy.io
 
-from . import rfdata
+from rfdata import RFdata
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
-def preprocess(result_path, list_pos, offset = 0):
+def load_usctsim_result(result_path):
     """
     * argument
         - result_path : by USCTSim
@@ -17,19 +18,20 @@ def preprocess(result_path, list_pos, offset = 0):
     * return
         - map_speed
         - map_dens
-        - preprocessed        
+        - preprocessed
     """
 
     assert os.path.exists(result_path)
-    assert len(list_pos) > 0
 
     param_path = os.path.join(result_path, 'param.json')
-    medium_path = os.path.join(result_path, 'medium.mat')
     sensor_path = os.path.join(result_path, 'sensor.mat')
+    points_path = os.path.join(result_path, 'mask_points.mat')
     rfdata_path = os.path.join(result_path, 'rfdata.mat')
+    medium_path = os.path.join(result_path, 'medium.mat')
 
     with open(param_path, 'r') as f: param = json.load(f)
-    arr_pos = scipy.io.loadmat(sensor_path)["sensor"]["mask"][0][0].T
+    arr_cart_pos = scipy.io.loadmat(sensor_path)["sensor"]["mask"][0][0].T
+    mask_points = scipy.io.loadmat(points_path)["mask_points"]
     mat_rfdata = h5py.File(rfdata_path, "r")["rfdata"]
     map_speed = h5py.File(medium_path, "r")["medium"]["sound_speed"]
     map_dens = h5py.File(medium_path, "r")["medium"]["density"]
@@ -41,8 +43,8 @@ def preprocess(result_path, list_pos, offset = 0):
     mat_normalized -= vmin
     mat_normalized /= (vmax-vmin)
 
-    rf = rfdata.RFdata(
-        pos = arr_pos,
+    rfdata = RFdata(
+        pos = arr_cart_pos,
         data = mat_normalized,
         src = np.array(param["source"]["point_map"])-1,
         rcv = np.arange(param["ringarray"]["num_points"]),
@@ -50,22 +52,37 @@ def preprocess(result_path, list_pos, offset = 0):
         c = np.mean(map_speed)
     )
 
-    preprocessed = np.zeros( (len(list_pos), rf.data.shape[0], rf.data.shape[1], 1+offset*2 ) )
-    mat_time = np.zeros_like(rf.data, dtype=np.int16)
-    for i in range(mat_time.shape[2]) : mat_time[:,:,i] = i
+    return param, arr_cart_pos, mask_points, map_speed, map_dens, rfdata
 
-    for p, pos in enumerate(list_pos):
+def draw_input(mask_points, map_speed, map_dens, save_path = None):
+    
+    points_pos = np.where(mask_points>0)
+    
+    fig = plt.figure(figsize=(12,9))
+    
+    ax = plt.subplot(121)
+    image = ax.imshow(map_speed, cmap='gray')
+    ax.axis("image")
+    plt.scatter( points_pos[0], points_pos[1], s=3)
+    plt.title("sound speed")
 
-        dist = rf.relevant_submat(np.array(pos)).astype(np.int16)
-        mat_time_diff = mat_time - dist[:,:,np.newaxis]
+    divider = make_axes_locatable(ax)
+    ax_cb = divider.new_horizontal(size="2%", pad=0.05)
+    fig.add_axes(ax_cb)    
+    plt.colorbar(image, cax = ax_cb)    
 
-        for o, offset in enumerate(np.arange(-offset, offset+1, 1)):
+    ax = plt.subplot(122)
+    image = ax.imshow(map_dens, cmap='gray')
+    ax.axis("image")
+    plt.scatter( points_pos[0], points_pos[1], s=3)
+    plt.title("density")
+    
+    divider = make_axes_locatable(ax)
+    ax_cb = divider.new_horizontal(size="2%", pad=0.05)
+    fig.add_axes(ax_cb)    
+    plt.colorbar(image, cax = ax_cb)    
 
-            mat_filter = np.ones_like(mat_time)
-            mat_filter *= (mat_time_diff == offset)*1
-            rf_filtered = rf.data * mat_filter
-            map_filtered = np.sum(rf_filtered, axis=2)
-
-            preprocessed[p, :, :, o] = map_filtered
-
-    return map_speed, map_dens, preprocessed
+    plt.show()
+    if save_path is not None:
+        plt.savefig(save_path)
+    
