@@ -31,29 +31,30 @@ class RFdata(object):
         
         return
         
-    def getPointSubset(self, target, offsets = [0]):
+    def getPointSubset(self, target, offset_min=0, offset_max=1, offset_int=1):
         
-        # (n_src, n_rcv, n_offset)
-        ret = np.zeros((self.data.shape[0], self.data.shape[1], len(offsets)))
-        
+        s_ = self.data.shape
+        len_offsets = len(np.arange(offset_min, offset_max, offset_int))
+
         # travel distance
         map_dist_src = np.linalg.norm( self.pos_src - target, axis = 2)
         map_dist_rcv = np.linalg.norm( self.pos_rcv - target, axis = 2)
         map_dist = map_dist_src + map_dist_rcv
-        
+
         # sampling index of arrival time (with offset)
         map_time_pos = (map_dist/(self.c*self.dt)).astype(np.uint16)
+        arr_time_pos = map_time_pos.flatten()
+
+        data_ = self.data.flatten().reshape(len(arr_time_pos), s_[2])
+        mat_out = np.zeros( (len(arr_time_pos), len_offsets),  dtype = np.float64)
+
+        for i, t in enumerate(arr_time_pos): 
+            try:
+                extracted = data_[i, t+offset_min:t+offset_max:offset_int]
+                mat_out[i, :len(extracted)] = extracted
+            except:
+                continue
+
+        submat = mat_out.reshape((s_[0], s_[1], len_offsets))
         
-        # subset extraction
-        for o, offset in enumerate(offsets):
-            arr_time_pos = ( map_time_pos + offset ).flatten()
-            mat_out = np.zeros(arr_time_pos.shape, dtype = np.float64)
-            data_ = self.data.flatten().reshape(len(arr_time_pos), self.data.shape[2])
-            for i, t in enumerate(arr_time_pos): 
-                try:
-                    mat_out[i] = data_[i, t]
-                except (IndexError):
-                    continue                    
-            ret[:,:,o] = mat_out.reshape(map_time_pos.shape)
-        
-        return map_time_pos, ret
+        return map_time_pos, submat
