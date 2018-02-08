@@ -8,9 +8,27 @@ import numpy as np
 import struct
 import matplotlib.pyplot as plt
 import glob
+import scipy.io
 
 from matplotlib import animation, rc
 from IPython.display import HTML
+
+
+def load_matlab_struct(path, name):
+    
+    def str2dict(str_x):
+        out = {}
+        for field in str_x._fieldnames:
+            attr = str_x.__getattribute__(field)
+            if isinstance(attr, scipy.io.matlab.mio5_params.mat_struct):
+                out[field] = str2dict(attr)
+            else:
+                out[field] = attr
+        return out
+    
+    str_ = scipy.io.loadmat(os.path.join(path, '{0}.mat'.format(name)),squeeze_me=True,struct_as_record=False)[name]
+    return str2dict(str_)
+
 
 
 def createGeoMap2d(shape):
