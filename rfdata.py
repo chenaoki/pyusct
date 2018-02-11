@@ -1,5 +1,5 @@
 import numpy as np
-import os, h5py, scipy.io, scipy.signal
+import os, h5py, scipy.io, scipy.signal, scipy.ndimage
 import util
 import matplotlib.pyplot as plt
 from mpl_toolkits.axes_grid1 import make_axes_locatable
@@ -18,6 +18,8 @@ class RFdata(object):
         medium            = h5py.File(os.path.join(result_path, 'medium.mat'), "r")["medium"]
         self.medium_c     = np.array(medium["sound_speed"])
         self.medium_d     = np.array(medium["density"])
+        self.medium_imp   = self.medium_c * self.medium_d
+        self.medium_sct   = scipy.ndimage.filters.gaussian_gradient_magnitude(self.medium_imp, sigma=1)
         
         self.kgrid        = util.load_matlab_struct(result_path, 'str_kgrid')
         self.dt           = self.kgrid["t_array"][1] - self.kgrid["t_array"][0]
@@ -38,7 +40,7 @@ class RFdata(object):
         path = os.path.join(result_path, "rfdata.mat")
         self.rawdata       = np.array(h5py.File(path, "r")["rfdata"])
         
-        # hilbert transform
+        # hilbert transformation
         comp_ = scipy.signal.hilbert(self.rawdata - self.rawdata.mean(), axis=2)
         self.phase = np.angle(comp_)
         self.amp = abs(comp_)
@@ -54,11 +56,12 @@ class RFdata(object):
         
         return
         
-    def getPointSubset(self, target, offset_arr=[0]):
+    def getPointSubset(self, ngrid, offset_arr=[0]):
 
         # travel distance
-        map_dist_src = np.linalg.norm( self.mesh_pos_src - target, axis = 2)
-        map_dist_rcv = np.linalg.norm( self.mesh_pos_rcv - target, axis = 2)
+        pos = self.ngrid2pos(ngrid)
+        map_dist_src = np.linalg.norm( self.mesh_pos_src - pos, axis = 2)
+        map_dist_rcv = np.linalg.norm( self.mesh_pos_rcv - pos, axis = 2)
         map_dist = map_dist_src + map_dist_rcv
 
         # sampling index of arrival time 
@@ -70,13 +73,43 @@ class RFdata(object):
             for i in range(self.T):
                 for j in range(self.R):
                     pos = map_time_pos[i,j]
-                    D[i,j,:] = RF[i,j,pos+offset_arr]
+                    ts = RF[i,j,:]
+                    ts = np.concatenate((ts, np.zeros_like(ts)))
+                    D[i,j,:] = ts[pos+offset_arr]
             return D
         
-        subset = pairwise_extraction(self.amp, map_time_pos, offset_arr)        
+        subset = pairwise_extraction(self.amp, map_time_pos, offset_arr)  
         
         return map_time_pos, subset
     
+    def syntheticAperture(self, c = 1, r = 1.0):
+        
+        mesh_grid = np.array(np.meshgrid( np.arange(self.kgrid["Ny"]//c), np.arange(self.kgrid["Nx"]//c) ))
+        ngrids = mesh_grid.reshape(2, mesh_grid.size//2).T
+        
+        # mask for transmitted wave removal
+        map_dist_tr = np.linalg.norm(self.mesh_pos_rcv - self.mesh_pos_src, axis=2)
+        mask = ( map_dist_tr < self.param["ringarray"]["radius"]*r )*1        
+        
+        def gridwise_summation(ngrid):
+            _, subset = self.getPointSubset(ngrid*c)
+            return np.sum(subset * mask[:,:,np.newaxis])
+        
+        sa = np.array([gridwise_summation(ngrid) for ngrid in ngrids])
+        sa = np.log(sa.reshape( self.kgrid["Nx"]//c, self.kgrid["Ny"]//c ).T)
+        return ngrids, mask, sa
+        
+    
+    def ngrid2pos(self, ngrid):
+        return np.array([ 
+                self.kgrid["x"].T[ngrid[0], ngrid[1]], 
+                self.kgrid["y"].T[ngrid[0], ngrid[1]]])
+    
+    def pos2ngrid(self, pos):
+        pos_array = np.array([self.kgrid["x"].T, self.kgrid["y"].T] )
+        dist = np.linalg.norm(pos_array - pos[:, np.newaxis, np.newaxis], axis=0)
+        ngrid = np.unravel_index( np.argmin(dist), dist.shape)
+        return ngrid    
 
     def draw_input(self):
     
