@@ -54,9 +54,12 @@ class RFdata(object):
         self.mesh_pos_rcv = self.sensor_pos[self.mesh_n_rcv,:]
         self.mesh_pos_src = self.sensor_pos[self.mesh_n_src,:]
         
+        # T-R mask
+        self.TRmask = None
+        
         return
         
-    def getPointSubset(self, ngrid, offset_arr=[0]):
+    def getPointSubset(self, ngrid, offset_arr=[0], flg_mask = True):
 
         # travel distance
         pos = self.ngrid2pos(ngrid)
@@ -76,28 +79,33 @@ class RFdata(object):
                     ts = RF[i,j,:]
                     ts = np.concatenate((ts, np.zeros_like(ts)))
                     D[i,j,:] = ts[pos+offset_arr]
-            return D
+            return D       
         
-        subset = pairwise_extraction(self.amp, map_time_pos, offset_arr)  
+        if flg_mask and self.TRmask is not None:
+            RF = self.amp * self.TRmask[:,:,np.newaxis]
+        else:
+            RF = self.amp
+        
+        subset = pairwise_extraction(RF, map_time_pos, offset_arr)
         
         return map_time_pos, subset
     
-    def syntheticAperture(self, c = 1, r = 1.0):
+    def setTRmask(self, maskFunc):
+        self.TRmask = maskFunc(self)
+        return self.TRmask
+    
+    def syntheticAperture(self, c = 1):
         
         mesh_grid = np.array(np.meshgrid( np.arange(self.kgrid["Ny"]//c), np.arange(self.kgrid["Nx"]//c) ))
         ngrids = mesh_grid.reshape(2, mesh_grid.size//2).T
         
-        # mask for transmitted wave removal
-        map_dist_tr = np.linalg.norm(self.mesh_pos_rcv - self.mesh_pos_src, axis=2)
-        mask = ( map_dist_tr < self.param["ringarray"]["radius"]*r )*1        
-        
         def gridwise_summation(ngrid):
             _, subset = self.getPointSubset(ngrid*c)
-            return np.sum(subset * mask[:,:,np.newaxis])
+            return np.sum(subset)
         
         sa = np.array([gridwise_summation(ngrid) for ngrid in ngrids])
         sa = np.log(sa.reshape( self.kgrid["Nx"]//c, self.kgrid["Ny"]//c ).T)
-        return ngrids, mask, sa
+        return sa
         
     
     def ngrid2pos(self, ngrid):
