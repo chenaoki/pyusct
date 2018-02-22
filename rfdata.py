@@ -2,6 +2,8 @@ import numpy as np
 import os, h5py, scipy.io, scipy.signal, scipy.ndimage
 import util
 import matplotlib.pyplot as plt
+import cv2
+
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 class RFdata(object):
@@ -19,7 +21,11 @@ class RFdata(object):
         self.medium_c     = np.array(medium["sound_speed"])
         self.medium_d     = np.array(medium["density"])
         self.medium_imp   = self.medium_c * self.medium_d
-        self.medium_sct   = scipy.ndimage.filters.gaussian_gradient_magnitude(self.medium_imp, sigma=1)
+        
+        #img               = self.medium_imp
+        #img_norm          = ((img - img.min()) * 255 / (img.max() - img.min()) ).astype(np.uint8)
+        img_lap           = np.abs(cv2.Laplacian(self.medium_imp,cv2.CV_64F))
+        self.medium_sct   = (img_lap > 0.0 )*1.0
         
         self.kgrid        = util.load_matlab_struct(result_path, 'str_kgrid')
         self.dt           = self.kgrid["t_array"][1] - self.kgrid["t_array"][0]
